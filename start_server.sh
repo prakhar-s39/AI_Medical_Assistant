@@ -9,6 +9,11 @@ fi
 echo "Starting AI Medical Assistant setup..."
 echo ""
 
+# Set Ollama performance environment variables
+export OLLAMA_NUM_PARALLEL=1
+export OLLAMA_MAX_LOADED_MODELS=1
+export OLLAMA_KEEP_ALIVE=5m
+
 # Check and start Ollama if needed
 echo "Checking Ollama..."
 

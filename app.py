@@ -35,6 +35,21 @@ def check_ollama_connection():
 ollama_available, ollama_status = check_ollama_connection()
 if ollama_available:
     print("✅ Ollama connection verified")
+    
+    # Pre-warm model to improve first request response time
+    def warm_up_model():
+        """Pre-load the model into memory"""
+        try:
+            ollama.chat(
+                model='phi3:mini',
+                messages=[{'role': 'user', 'content': 'test'}],
+                options={'num_predict': 5, 'num_ctx': 128}  # Minimal tokens for warm-up
+            )
+            print("✅ Model warmed up and ready")
+        except Exception as e:
+            print(f"⚠️  Model warm-up failed: {e}")
+    
+    warm_up_model()
 else:
     print(f"⚠️  Ollama check failed: {ollama_status}")
 
@@ -76,7 +91,7 @@ class QueryResponse(BaseModel):
     diagnosis: str = Field(description="Medical diagnosis or assessment")
     advice: str = Field(description="Advice or recommendations")
 
-# Safety filtering patterns
+# Safety filtering patterns - compiled for performance
 DANGEROUS_KEYWORDS = [
     r'\b(prescribe|prescription)\b',
     r'\b(dose|dosage)\s+\d+',
@@ -92,86 +107,100 @@ UNCERTAINTY_INDICATORS = [
     r'\b(suggests|indicates|may|could\s+be)\b',
 ]
 
+# Compile regex patterns once for better performance
+DANGEROUS_PATTERNS = [re.compile(pattern, re.IGNORECASE) for pattern in DANGEROUS_KEYWORDS]
+UNCERTAINTY_PATTERNS = [re.compile(pattern, re.IGNORECASE) for pattern in UNCERTAINTY_INDICATORS]
+
 DISCLAIMER = "⚠️ Disclaimer: Not a substitute for professional advice."
 
 def check_dangerous_content(text: str) -> bool:
     """Check if response contains dangerous medical keywords"""
     text_lower = text.lower()
-    for pattern in DANGEROUS_KEYWORDS:
-        if re.search(pattern, text_lower, re.IGNORECASE):
+    for pattern in DANGEROUS_PATTERNS:
+        if pattern.search(text_lower):
             return True
     return False
 
 def check_uncertain_content(text: str) -> bool:
     """Check if response contains uncertainty indicators"""
     text_lower = text.lower()
-    for pattern in UNCERTAINTY_INDICATORS:
-        if re.search(pattern, text_lower, re.IGNORECASE):
+    for pattern in UNCERTAINTY_PATTERNS:
+        if pattern.search(text_lower):
             return True
     return False
+
+# Compile regex patterns for parsing (better performance)
+DIAGNOSIS_PATTERNS = [
+    re.compile(r'(?:diagnosis/assessment|diagnosis)[:\s]+(.+?)(?=\n\s*(?:advice|recommendation)|$)', re.IGNORECASE | re.DOTALL | re.MULTILINE),
+    re.compile(r'(?:diagnosis/assessment|diagnosis)[:\s]+(.+?)(?=\n\s*\n|$)', re.IGNORECASE | re.DOTALL | re.MULTILINE),
+    re.compile(r'^(?:diagnosis/assessment|diagnosis)[:\s]+(.+?)(?=\n|$)', re.IGNORECASE | re.DOTALL | re.MULTILINE),
+]
+
+ADVICE_PATTERNS = [
+    re.compile(r'(?:advice/recommendations?|advice)[:\s]+(.+?)$', re.IGNORECASE | re.DOTALL | re.MULTILINE),
+    re.compile(r'(?:advice/recommendations?|advice)[:\s]+(.+)', re.IGNORECASE | re.DOTALL | re.MULTILINE),
+]
+
+# Compiled cleanup patterns
+CLEANUP_SEPARATORS = re.compile(r'\s*-\s*(?:Diagnosis/Assessment|Advice/Recommendations):\s*', re.IGNORECASE)
+CLEANUP_DASHES = re.compile(r'\s*[-–—]\s*')
+CLEANUP_TRAILING_DASH = re.compile(r'\s*[-–—]\s*$')
+CLEANUP_EXTRA_LABELS_DIAG = re.compile(r'\s*(?:advice|recommendation).*$', re.IGNORECASE)
+CLEANUP_EXTRA_LABELS_ADV = re.compile(r'\s*(?:confidence|note).*$', re.IGNORECASE)
+CLEANUP_WHITESPACE = re.compile(r'\s+')
+CLEANUP_DIAGNOSIS_PREFIX = re.compile(r'^\s*(?:diagnosis|assessment|⚠️\s*Disclaimer)[:\s]*', re.IGNORECASE)
+CLEANUP_ADVICE_PREFIX = re.compile(r'^\s*(?:advice|recommendation)[:\s]*', re.IGNORECASE)
 
 def parse_structured_response(response_text: str) -> dict:
     """
     Parse the model response into structured format.
     Attempts to extract diagnosis and advice from the response.
+    Uses compiled regex patterns for better performance.
     """
     # Remove disclaimer if already present
     response_text = response_text.replace(DISCLAIMER, "").strip()
     
     # Clean up common separator patterns
-    response_text = re.sub(r'\s*-\s*(?:Diagnosis/Assessment|Advice/Recommendations):\s*', '\n', response_text, flags=re.IGNORECASE)
-    response_text = re.sub(r'\s*[-–—]\s*', '\n', response_text)
+    response_text = CLEANUP_SEPARATORS.sub('\n', response_text)
+    response_text = CLEANUP_DASHES.sub('\n', response_text)
     
     # Try to extract structured fields from response
     diagnosis = ""
     advice = ""
     
-    # Improved regex patterns that handle labels more flexibly
-    # Pattern 1: Look for "Diagnosis/Assessment:" or "Diagnosis:" followed by text until "Advice"
-    diagnosis_patterns = [
-        r'(?:diagnosis/assessment|diagnosis)[:\s]+(.+?)(?=\n\s*(?:advice|recommendation)|$)',  # Until Advice label
-        r'(?:diagnosis/assessment|diagnosis)[:\s]+(.+?)(?=\n\s*\n|$)',  # Until double newline
-        r'^(?:diagnosis/assessment|diagnosis)[:\s]+(.+?)(?=\n|$)',  # From start until newline
-    ]
-    
-    # Pattern 2: Look for "Advice/Recommendations:" or "Advice:" followed by text until end
-    advice_patterns = [
-        r'(?:advice/recommendations?|advice)[:\s]+(.+?)$',  # From Advice label to end
-        r'(?:advice/recommendations?|advice)[:\s]+(.+)',  # From Advice label onwards
-    ]
-    
-    # Try to extract diagnosis
-    for pattern in diagnosis_patterns:
-        match = re.search(pattern, response_text, re.IGNORECASE | re.DOTALL | re.MULTILINE)
+    # Try to extract diagnosis using compiled patterns
+    for pattern in DIAGNOSIS_PATTERNS:
+        match = pattern.search(response_text)
         if match:
             diagnosis = match.group(1).strip()
             # Clean up: remove any trailing separators, extra labels, or continuation markers
-            diagnosis = re.sub(r'\s*[-–—]\s*$', '', diagnosis)
-            diagnosis = re.sub(r'\s*(?:advice|recommendation).*$', '', diagnosis, flags=re.IGNORECASE)
-            diagnosis = re.sub(r'\s+', ' ', diagnosis)  # Normalize whitespace
+            diagnosis = CLEANUP_TRAILING_DASH.sub('', diagnosis)
+            diagnosis = CLEANUP_EXTRA_LABELS_DIAG.sub('', diagnosis)
+            diagnosis = CLEANUP_WHITESPACE.sub(' ', diagnosis)  # Normalize whitespace
             if diagnosis and len(diagnosis) > 10:  # Valid diagnosis found
                 break
     
-    # Try to extract advice
-    for pattern in advice_patterns:
-        match = re.search(pattern, response_text, re.IGNORECASE | re.DOTALL | re.MULTILINE)
+    # Try to extract advice using compiled patterns
+    for pattern in ADVICE_PATTERNS:
+        match = pattern.search(response_text)
         if match:
             advice = match.group(1).strip()
             # Clean up: remove any trailing markers
-            advice = re.sub(r'\s*[-–—]\s*$', '', advice)
-            advice = re.sub(r'\s*(?:confidence|note).*$', '', advice, flags=re.IGNORECASE)
-            advice = re.sub(r'\s+', ' ', advice)  # Normalize whitespace
+            advice = CLEANUP_TRAILING_DASH.sub('', advice)
+            advice = CLEANUP_EXTRA_LABELS_ADV.sub('', advice)
+            advice = CLEANUP_WHITESPACE.sub(' ', advice)  # Normalize whitespace
             if advice and len(advice) > 10:  # Valid advice found
                 break
     
     # If extraction failed, try intelligent splitting
     if not diagnosis or not advice:
-        # Remove all label markers first
-        cleaned = re.sub(r'(?:diagnosis/assessment|diagnosis|advice/recommendations?|advice)[:\s]*', '', response_text, flags=re.IGNORECASE)
+        # Remove all label markers first (compiled pattern)
+        label_remover = re.compile(r'(?:diagnosis/assessment|diagnosis|advice/recommendations?|advice)[:\s]*', re.IGNORECASE)
+        cleaned = label_remover.sub('', response_text)
         
         # Try splitting by double newlines or clear separators
-        parts = re.split(r'\n\n+|(?:\n|^)\s*(?:Advice|Recommendation)', cleaned, flags=re.IGNORECASE | re.MULTILINE)
-        parts = [p.strip() for p in parts if p.strip()]
+        split_pattern = re.compile(r'\n\n+|(?:\n|^)\s*(?:Advice|Recommendation)', re.IGNORECASE | re.MULTILINE)
+        parts = [p.strip() for p in split_pattern.split(cleaned) if p.strip()]
         
         if len(parts) >= 2:
             diagnosis = parts[0].strip()
@@ -192,37 +221,37 @@ def parse_structured_response(response_text: str) -> dict:
             diagnosis = text[:split_point].strip()
             advice = text[split_point:].strip()
     
-    # Final cleanup - remove any remaining label text
-    diagnosis = re.sub(r'^\s*(?:diagnosis|assessment)[:\s]*', '', diagnosis, flags=re.IGNORECASE)
-    advice = re.sub(r'^\s*(?:advice|recommendation)[:\s]*', '', advice, flags=re.IGNORECASE)
+    # Final cleanup - remove any remaining label text (using compiled patterns)
+    diagnosis = CLEANUP_DIAGNOSIS_PREFIX.sub('', diagnosis)
+    advice = CLEANUP_ADVICE_PREFIX.sub('', advice)
     
     # Remove any remaining separator markers
-    diagnosis = re.sub(r'\s*[-–—]\s*$', '', diagnosis).strip()
-    advice = re.sub(r'\s*[-–—]\s*$', '', advice).strip()
+    diagnosis = CLEANUP_TRAILING_DASH.sub('', diagnosis).strip()
+    advice = CLEANUP_TRAILING_DASH.sub('', advice).strip()
     
     # Fallback if still empty
     if not diagnosis or len(diagnosis) < 10:
         # Use first 150 chars as diagnosis
         diagnosis = response_text[:150].strip()
         # Remove any labels from the beginning
-        diagnosis = re.sub(r'^\s*(?:diagnosis|assessment|⚠️\s*Disclaimer)[:\s]*', '', diagnosis, flags=re.IGNORECASE)
-        diagnosis = re.sub(r'\s*[-–—]\s*', ' ', diagnosis)
+        diagnosis = CLEANUP_DIAGNOSIS_PREFIX.sub('', diagnosis)
+        diagnosis = CLEANUP_DASHES.sub(' ', diagnosis)
     
     if not advice or len(advice) < 10:
         # Try to find advice after diagnosis
         remaining = response_text[len(diagnosis):].strip()
         advice = remaining[:200].strip() if remaining else "Please consult a healthcare professional for proper evaluation."
         # Remove any labels
-        advice = re.sub(r'^\s*(?:advice|recommendation)[:\s]*', '', advice, flags=re.IGNORECASE)
-        advice = re.sub(r'\s*[-–—]\s*', ' ', advice)
+        advice = CLEANUP_ADVICE_PREFIX.sub('', advice)
+        advice = CLEANUP_DASHES.sub(' ', advice)
     
     # Final normalization - remove extra whitespace
-    diagnosis = re.sub(r'\s+', ' ', diagnosis).strip()
-    advice = re.sub(r'\s+', ' ', advice).strip()
+    diagnosis = CLEANUP_WHITESPACE.sub(' ', diagnosis).strip()
+    advice = CLEANUP_WHITESPACE.sub(' ', advice).strip()
     
     return {
-        "diagnosis": diagnosis[:300],  # Limit length
-        "advice": advice[:300]  # Limit length
+        "diagnosis": diagnosis[:500],  # Increased limit since token limit removed
+        "advice": advice[:500]  # Increased limit since token limit removed
     }
 
 # Health check endpoint (API endpoint, separate from root)
@@ -269,7 +298,7 @@ async def ask_question(request: QueryRequest):
     
     Returns structured output with diagnosis and advice.
     Includes safety filtering to prevent dangerous medical claims.
-    Responses are limited to ~200 tokens for faster performance.
+    Optimized for fast response times with compiled regex patterns.
     
     Args:
         request: QueryRequest containing the user's query string
@@ -284,33 +313,21 @@ async def ask_question(request: QueryRequest):
         raise HTTPException(status_code=400, detail="Query cannot be empty")
     
     try:
-        # Enhanced prompt to encourage structured output
-        structured_prompt = f"""Please provide a brief medical assessment for the following query. Format your response clearly with:
-- Diagnosis/Assessment: [your assessment]
-- Advice/Recommendations: [your advice]
-
-Keep responses concise (100-200 words total). Always emphasize consulting healthcare professionals for serious concerns. Do not prescribe medications or specific dosages.
+        # Optimized shorter prompt for faster processing
+        structured_prompt = f"""Brief medical assessment. Format:
+- Diagnosis/Assessment: [assessment]
+- Advice/Recommendations: [advice]
 
 Query: {request.query}"""
         
-        # Verify Ollama is accessible before making the call
-        try:
-            # Quick check - verify Ollama is responding
-            ollama.list()
-        except Exception as e:
-            raise HTTPException(
-                status_code=503,
-                detail=f"Ollama service is not available. Please ensure Ollama is running: {str(e)}. Try: systemctl status ollama"
-            )
-        
-        # Call Ollama API with phi3:mini model
+        # Call Ollama API with phi3:mini model (removed redundant health check)
         try:
             response = ollama.chat(
                 model='phi3:mini',
                 messages=[
                     {
                         'role': 'system',
-                        'content': 'You are a helpful medical assistant. Provide clear, concise, structured medical information. Always remind users that your advice is not a substitute for professional medical consultation. Never prescribe medications or specific dosages. Keep responses brief and to the point.'
+                        'content': 'Medical assistant. Brief, structured responses. Not medical advice.'
                     },
                     {
                         'role': 'user',
@@ -318,8 +335,12 @@ Query: {request.query}"""
                     }
                 ],
                 options={
-                    'num_predict': 200,  # Limit to ~200 tokens for faster response
-                    'temperature': 0.7   # Slightly lower temperature for more focused responses
+                    'temperature': 0.7,      # Lower temperature for focused responses
+                    'num_ctx': 512,          # Reduced context window (default 2048)
+                    'num_thread': 4,         # Optimize for Raspberry Pi 5
+                    'repeat_penalty': 1.1,   # Prevent repetition, faster completion
+                    'top_p': 0.9,            # Nucleus sampling for faster generation
+                    'top_k': 20,            # Limit vocabulary for speed
                 }
             )
         except Exception as e:
