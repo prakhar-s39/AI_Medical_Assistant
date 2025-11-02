@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Medical Assistant</title>
+    <title>PiCare – Local Medical Assistant</title>
     <link rel="stylesheet" href="/static/styles.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
 </head>
@@ -11,9 +11,16 @@
     <div class="background-animation" id="backgroundAnimation"></div>
     
     <div class="container">
-        <header>
-            <h1>🏥 AI Medical Assistant</h1>
-            <p class="subtitle">Powered by Local LLM • Raspberry Pi 5</p>
+        <header class="logo-header">
+            <div class="logo-container">
+                <div class="heartbeat-circle" id="heartbeatCircle"></div>
+                <div class="logo-icon">🏥</div>
+                <div class="logo-text">
+                    <h1 class="logo-title">PiCare</h1>
+                    <p class="logo-subtitle">Local Medical Assistant</p>
+                </div>
+            </div>
+            <p class="header-subtitle">Powered by Local LLM • Raspberry Pi 5</p>
         </header>
 
         <div class="main-content">
@@ -36,7 +43,7 @@
                 </div>
             </div>
 
-            <div class="response-section" id="responseSection" style="display: none;">
+            <div class="response-section" id="responseSection" style="display: none; opacity: 0;">
                 <div class="card diagnosis-card" id="diagnosisCard">
                     <div class="card-header">
                         <span class="card-icon">📋</span>
