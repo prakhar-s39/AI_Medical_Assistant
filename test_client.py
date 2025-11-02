@@ -8,7 +8,7 @@ import requests
 import sys
 
 # Configuration - CHANGE THIS to your Raspberry Pi's IP address
-PI_IP = "192.168.1.100"  # Replace with your Pi's IP
+PI_IP = "172.19.105.161"  # Replace with your Pi's IP
 API_URL = f"http://{PI_IP}:8000"
 
 def test_health():
@@ -36,7 +36,12 @@ def ask_question(query):
             result = response.json()
             print(f"✅ Response received:")
             print(f"Query: {query}")
-            print(f"Answer: {result['response']}\n")
+            print(f"\n📋 Diagnosis/Assessment:")
+            print(f"   {result.get('diagnosis', 'N/A')}")
+            print(f"\n💡 Advice/Recommendations:")
+            print(f"   {result.get('advice', 'N/A')}")
+            print(f"\n📊 Confidence Level: {result.get('confidence', 'N/A').upper()}")
+            print()
             return True
         else:
             print(f"❌ Error: {response.status_code}")
