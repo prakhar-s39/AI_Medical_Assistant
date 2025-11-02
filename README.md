@@ -103,3 +103,29 @@ Or use the interactive API docs:
 - If issues occur, ensure no other memory-intensive processes are running
 - Consider using `phi3:mini-instruct` variant if available
 
+**Issue: pydantic-core build failure (Rust compilation error)**
+- This error typically occurs when pydantic-core needs to be built from source (e.g., Python 3.13 or missing pre-built wheels)
+- Solutions:
+  1. **Recommended**: Use Python 3.11 or 3.12 which have pre-built wheels for ARM64:
+     ```bash
+     # Check Python version
+     python3 --version
+     
+     # If using Python 3.13, consider using Python 3.12 instead
+     # Install Python 3.12 if needed (on Raspberry Pi OS):
+     sudo apt update && sudo apt install python3.12 python3.12-venv
+     python3.12 -m venv venv
+     source venv/bin/activate
+     pip install -r requirements.txt
+     ```
+  2. **Alternative**: Install Rust to allow building from source:
+     ```bash
+     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+     source ~/.cargo/env
+     pip install -r requirements.txt
+     ```
+  3. **Alternative**: Try installing pydantic without building from source:
+     ```bash
+     pip install --only-binary :all: -r requirements.txt
+     ```
+

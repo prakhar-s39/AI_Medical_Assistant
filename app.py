@@ -5,7 +5,6 @@ Connects to local Ollama installation running phi3:mini model
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import Optional
 import ollama
 
 # Initialize FastAPI app
