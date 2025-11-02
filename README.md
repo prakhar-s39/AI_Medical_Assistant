@@ -13,9 +13,10 @@ A lightweight AI medical assistant backend running locally on Raspberry Pi 5 usi
 ```bash
 # On Raspberry Pi (SSH):
 cd /home/peter/Coding/raspi
-./start_server.sh              # Start server
-tail -f server.log             # View logs
-./stop_server.sh               # Stop server
+./start_server.sh              # Start Ollama & server (automatic)
+tail -f server.log             # View server logs
+tail -f ollama.log              # View Ollama logs (if started directly)
+./stop_server.sh               # Stop server (Ollama stays running)
 
 # On your laptop:
 # Web Interface (Easiest):
@@ -61,6 +62,17 @@ http://<PI_IP>:8000/docs       # Interactive API docs
    ```bash
    curl http://localhost:11434/api/tags
    ```
+
+3. **Run the verification script (optional but recommended):**
+   ```bash
+   ./verify_setup.sh
+   ```
+   This checks:
+   - ✅ Python installation
+   - ✅ Ollama installation and service status
+   - ✅ phi3:mini model availability
+   - ✅ Python dependencies
+   - ✅ Frontend files
 
 ## Running the Server (Headless Setup)
 
@@ -116,21 +128,34 @@ uvicorn app:app --host 0.0.0.0 --port 8000
 **To detach:** `Ctrl+B`, then `D`  
 **To reattach:** `tmux attach -t medical-assistant`
 
-### Option 3: Using Helper Scripts (Simplest)
+### Option 3: Using Helper Scripts (Simplest - Recommended)
 
 **On the Raspberry Pi (via SSH):**
 ```bash
 cd /home/peter/Coding/raspi
 
-# Start the server in background
+# Start both Ollama and the server in background
 ./start_server.sh
 
-# View logs
-tail -f server.log
+# The script will:
+# - Check if Ollama is running (or start it)
+# - Start the FastAPI server in the background
+# - Show service status and PIDs
 
-# Stop the server
+# View logs
+tail -f server.log          # FastAPI server logs
+tail -f ollama.log          # Ollama logs (if started directly)
+
+# Stop the server (Ollama stays running if it's a service)
 ./stop_server.sh
 ```
+
+**Note:** The start script automatically:
+- ✅ Checks if Ollama is already running
+- ✅ Starts Ollama service if needed (via systemctl)
+- ✅ Falls back to running Ollama directly if service isn't available
+- ✅ Verifies Ollama is accessible before starting the server
+- ✅ Saves PIDs to `.pid` files for easy management
 
 ### Option 4: Using `nohup` (Manual background process)
 
@@ -333,12 +358,65 @@ The frontend is located in the `/frontend` directory and includes:
 - Anime.js is loaded from CDN (no local installation needed)
 - All files are self-contained in the `/frontend` directory
 
+## How Everything Works Together
+
+**Complete Integration Flow:**
+
+1. **Ollama Service** (running on Pi)
+   - Provides the `phi3:mini` LLM model
+   - Listens on `localhost:11434`
+   - Handles all AI inference requests
+
+2. **FastAPI Backend** (app.py)
+   - Connects to Ollama using the `ollama` Python library
+   - Verifies Ollama connection on startup
+   - Processes medical queries via `/ask` endpoint
+   - Applies safety filtering to responses
+   - Serves the frontend at `/`
+
+3. **Frontend** (HTML/CSS/JS)
+   - Served by FastAPI from `/frontend` directory
+   - Sends requests to `/ask` API endpoint
+   - Displays structured responses (diagnosis, advice, confidence)
+
+**Verification Steps:**
+
+```bash
+# 1. Check Ollama is running
+systemctl status ollama
+# or
+pgrep -x ollama
+
+# 2. Verify phi3:mini model is available
+ollama list | grep phi3:mini
+
+# 3. Test Ollama directly
+ollama run phi3:mini "test"
+
+# 4. Run verification script
+./verify_setup.sh
+
+# 5. Start the FastAPI server
+./start_server.sh
+
+# 6. Check server logs for Ollama connection status
+tail -f server.log
+# You should see: "✅ Ollama connection verified"
+```
+
+**If Ollama is not working:**
+- The server will start but show a warning
+- Health endpoint (`/api/health`) will show Ollama status
+- API calls will fail with clear error messages
+- Check: `systemctl status ollama` or restart: `systemctl restart ollama`
+
 ## Notes
 
 - The `phi3:mini` model is optimized for lightweight inference on resource-constrained devices like Raspberry Pi 5
-- Ensure Ollama is running before starting the FastAPI server
+- **Ollama must be running** before starting the FastAPI server (the app checks this on startup)
 - The system prompt instructs the model to provide medical information with appropriate disclaimers
 - Frontend automatically connects to the backend API running on the same server
+- All components run locally - no external APIs required
 - For production use, consider adding authentication, rate limiting, and logging
 
 ## Troubleshooting

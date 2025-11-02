@@ -11,6 +11,33 @@ from pydantic import BaseModel, Field
 import ollama
 import os
 
+# Check Ollama connection on startup
+def check_ollama_connection():
+    """Verify Ollama is accessible and model is available"""
+    try:
+        # Check if Ollama is running
+        models = ollama.list()
+        model_names = [model['name'] for model in models.get('models', [])]
+        
+        # Check if phi3:mini is available
+        if 'phi3:mini' not in model_names:
+            print("⚠️  Warning: phi3:mini model not found. Available models:", model_names)
+            print("   Run: ollama pull phi3:mini")
+            return False, "Model 'phi3:mini' not found"
+        
+        return True, "Ollama connected successfully"
+    except Exception as e:
+        print(f"❌ Error connecting to Ollama: {e}")
+        print("   Make sure Ollama is running: systemctl status ollama")
+        return False, str(e)
+
+# Check Ollama on startup
+ollama_available, ollama_status = check_ollama_connection()
+if ollama_available:
+    print("✅ Ollama connection verified")
+else:
+    print(f"⚠️  Ollama check failed: {ollama_status}")
+
 # Initialize FastAPI app
 app = FastAPI(
     title="AI Medical Assistant",
@@ -145,14 +172,38 @@ def parse_structured_response(response_text: str) -> dict:
 # Health check endpoint (API endpoint, separate from root)
 @app.get("/api/health")
 async def health():
-    """Health check endpoint"""
-    return {
-        "status": "healthy",
-        "service": "AI Medical Assistant",
-        "model": "phi3:mini",
-        "version": "2.0.0",
-        "features": ["structured_output", "safety_filtering"]
-    }
+    """Health check endpoint with Ollama status"""
+    try:
+        # Check Ollama availability
+        models = ollama.list()
+        model_names = [model['name'] for model in models.get('models', [])]
+        has_model = 'phi3:mini' in model_names
+        
+        return {
+            "status": "healthy",
+            "service": "AI Medical Assistant",
+            "model": "phi3:mini",
+            "version": "2.0.0",
+            "features": ["structured_output", "safety_filtering"],
+            "ollama": {
+                "connected": True,
+                "model_available": has_model,
+                "available_models": model_names
+            }
+        }
+    except Exception as e:
+        return {
+            "status": "degraded",
+            "service": "AI Medical Assistant",
+            "model": "phi3:mini",
+            "version": "2.0.0",
+            "features": ["structured_output", "safety_filtering"],
+            "ollama": {
+                "connected": False,
+                "error": str(e)
+            },
+            "warning": "Ollama is not accessible. API will not function properly."
+        }
 
 # Main query endpoint
 @app.post("/ask", response_model=QueryResponse)
@@ -186,20 +237,42 @@ Remember: Always emphasize consulting healthcare professionals for serious conce
 
 Query: {request.query}"""
         
+        # Verify Ollama is accessible before making the call
+        try:
+            # Quick check - verify Ollama is responding
+            ollama.list()
+        except Exception as e:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Ollama service is not available. Please ensure Ollama is running: {str(e)}. Try: systemctl status ollama"
+            )
+        
         # Call Ollama API with phi3:mini model
-        response = ollama.chat(
-            model='phi3:mini',
-            messages=[
-                {
-                    'role': 'system',
-                    'content': 'You are a helpful medical assistant. Provide clear, structured medical information. Always remind users that your advice is not a substitute for professional medical consultation. Never prescribe medications or specific dosages.'
-                },
-                {
-                    'role': 'user',
-                    'content': structured_prompt
-                }
-            ]
-        )
+        try:
+            response = ollama.chat(
+                model='phi3:mini',
+                messages=[
+                    {
+                        'role': 'system',
+                        'content': 'You are a helpful medical assistant. Provide clear, structured medical information. Always remind users that your advice is not a substitute for professional medical consultation. Never prescribe medications or specific dosages.'
+                    },
+                    {
+                        'role': 'user',
+                        'content': structured_prompt
+                    }
+                ]
+            )
+        except Exception as e:
+            # Check if it's a model not found error
+            if 'model' in str(e).lower() or 'not found' in str(e).lower():
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Model 'phi3:mini' not found. Please run: ollama pull phi3:mini"
+                )
+            raise HTTPException(
+                status_code=503,
+                detail=f"Error calling Ollama: {str(e)}"
+            )
         
         # Extract the response text
         reply = response['message']['content']

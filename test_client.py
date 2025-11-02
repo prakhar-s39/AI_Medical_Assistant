@@ -14,13 +14,20 @@ API_URL = f"http://{PI_IP}:8000"
 def test_health():
     """Test the health check endpoint"""
     try:
-        response = requests.get(f"{API_URL}/")
+        response = requests.get(f"{API_URL}/api/health")
         print("Health Check:")
         print(f"Status: {response.status_code}")
-        print(f"Response: {response.json()}\n")
+        if response.status_code == 200:
+            health_data = response.json()
+            print(f"Service: {health_data.get('service', 'N/A')}")
+            print(f"Model: {health_data.get('model', 'N/A')}")
+            print(f"Version: {health_data.get('version', 'N/A')}\n")
+        else:
+            print(f"Response: {response.text}\n")
         return response.status_code == 200
     except Exception as e:
         print(f"❌ Health check failed: {e}\n")
+        print("Note: You can skip this check and go directly to http://<PI_IP>:8000 in your browser\n")
         return False
 
 def ask_question(query):
