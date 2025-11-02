@@ -231,16 +231,16 @@ def parse_structured_response(response_text: str) -> dict:
     
     # Fallback if still empty
     if not diagnosis or len(diagnosis) < 10:
-        # Use first 150 chars as diagnosis
-        diagnosis = response_text[:150].strip()
+        # Use full response text as diagnosis (no truncation)
+        diagnosis = response_text.strip()
         # Remove any labels from the beginning
         diagnosis = CLEANUP_DIAGNOSIS_PREFIX.sub('', diagnosis)
         diagnosis = CLEANUP_DASHES.sub(' ', diagnosis)
     
     if not advice or len(advice) < 10:
         # Try to find advice after diagnosis
-        remaining = response_text[len(diagnosis):].strip()
-        advice = remaining[:200].strip() if remaining else "Please consult a healthcare professional for proper evaluation."
+        remaining = response_text[len(diagnosis):].strip() if len(response_text) > len(diagnosis) else response_text.strip()
+        advice = remaining if remaining else "Please consult a healthcare professional for proper evaluation."
         # Remove any labels
         advice = CLEANUP_ADVICE_PREFIX.sub('', advice)
         advice = CLEANUP_DASHES.sub(' ', advice)
@@ -250,8 +250,8 @@ def parse_structured_response(response_text: str) -> dict:
     advice = CLEANUP_WHITESPACE.sub(' ', advice).strip()
     
     return {
-        "diagnosis": diagnosis[:500],  # Increased limit since token limit removed
-        "advice": advice[:500]  # Increased limit since token limit removed
+        "diagnosis": diagnosis,  # No character limit - show full response
+        "advice": advice  # No character limit - show full response
     }
 
 # Health check endpoint (API endpoint, separate from root)
@@ -372,10 +372,7 @@ Query: {request.query}"""
         # Parse into structured format
         structured = parse_structured_response(reply)
         
-        # Add disclaimer to diagnosis if uncertain or dangerous content detected
-        if needs_disclaimer or has_dangerous_content:
-            if not structured["diagnosis"].startswith(DISCLAIMER):
-                structured["diagnosis"] = f"{DISCLAIMER} {structured['diagnosis']}"
+        # Don't add disclaimer to diagnosis - footer disclaimer is sufficient
         
         return QueryResponse(**structured)
     
