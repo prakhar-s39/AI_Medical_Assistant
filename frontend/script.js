@@ -111,11 +111,6 @@ function displayResults(data) {
     document.getElementById('diagnosisContent').textContent = data.diagnosis || 'No diagnosis provided.';
     document.getElementById('adviceContent').textContent = data.advice || 'No advice provided.';
     
-    // Update confidence with badge
-    const confidence = (data.confidence || 'medium').toLowerCase();
-    const confidenceContent = document.getElementById('confidenceContent');
-    confidenceContent.innerHTML = `<span class="confidence-badge confidence-${confidence}">${confidence}</span>`;
-    
     // Show response section
     responseSection.style.display = 'grid';
     

@@ -75,7 +75,6 @@ class QueryRequest(BaseModel):
 class QueryResponse(BaseModel):
     diagnosis: str = Field(description="Medical diagnosis or assessment")
     advice: str = Field(description="Advice or recommendations")
-    confidence: str = Field(description="Confidence level (e.g., 'low', 'medium', 'high')")
 
 # Safety filtering patterns
 DANGEROUS_KEYWORDS = [
@@ -114,59 +113,116 @@ def check_uncertain_content(text: str) -> bool:
 def parse_structured_response(response_text: str) -> dict:
     """
     Parse the model response into structured format.
-    Attempts to extract diagnosis, advice, and confidence from the response.
+    Attempts to extract diagnosis and advice from the response.
     """
     # Remove disclaimer if already present
     response_text = response_text.replace(DISCLAIMER, "").strip()
     
+    # Clean up common separator patterns
+    response_text = re.sub(r'\s*-\s*(?:Diagnosis/Assessment|Advice/Recommendations):\s*', '\n', response_text, flags=re.IGNORECASE)
+    response_text = re.sub(r'\s*[-–—]\s*', '\n', response_text)
+    
     # Try to extract structured fields from response
     diagnosis = ""
     advice = ""
-    confidence = "medium"
     
-    # Look for explicit labels
-    diagnosis_match = re.search(r'(?:diagnosis|assessment):\s*(.+?)(?:\n|$|advice|confidence)', response_text, re.IGNORECASE | re.DOTALL)
-    advice_match = re.search(r'(?:advice|recommendation):\s*(.+?)(?:\n|$|confidence)', response_text, re.IGNORECASE | re.DOTALL)
-    confidence_match = re.search(r'(?:confidence):\s*(low|medium|high)', response_text, re.IGNORECASE)
+    # Improved regex patterns that handle labels more flexibly
+    # Pattern 1: Look for "Diagnosis/Assessment:" or "Diagnosis:" followed by text until "Advice"
+    diagnosis_patterns = [
+        r'(?:diagnosis/assessment|diagnosis)[:\s]+(.+?)(?=\n\s*(?:advice|recommendation)|$)',  # Until Advice label
+        r'(?:diagnosis/assessment|diagnosis)[:\s]+(.+?)(?=\n\s*\n|$)',  # Until double newline
+        r'^(?:diagnosis/assessment|diagnosis)[:\s]+(.+?)(?=\n|$)',  # From start until newline
+    ]
     
-    if diagnosis_match:
-        diagnosis = diagnosis_match.group(1).strip()
-    if advice_match:
-        advice = advice_match.group(1).strip()
-    if confidence_match:
-        confidence = confidence_match.group(1).lower()
+    # Pattern 2: Look for "Advice/Recommendations:" or "Advice:" followed by text until end
+    advice_patterns = [
+        r'(?:advice/recommendations?|advice)[:\s]+(.+?)$',  # From Advice label to end
+        r'(?:advice/recommendations?|advice)[:\s]+(.+)',  # From Advice label onwards
+    ]
     
-    # If no explicit structure found, split intelligently
+    # Try to extract diagnosis
+    for pattern in diagnosis_patterns:
+        match = re.search(pattern, response_text, re.IGNORECASE | re.DOTALL | re.MULTILINE)
+        if match:
+            diagnosis = match.group(1).strip()
+            # Clean up: remove any trailing separators, extra labels, or continuation markers
+            diagnosis = re.sub(r'\s*[-–—]\s*$', '', diagnosis)
+            diagnosis = re.sub(r'\s*(?:advice|recommendation).*$', '', diagnosis, flags=re.IGNORECASE)
+            diagnosis = re.sub(r'\s+', ' ', diagnosis)  # Normalize whitespace
+            if diagnosis and len(diagnosis) > 10:  # Valid diagnosis found
+                break
+    
+    # Try to extract advice
+    for pattern in advice_patterns:
+        match = re.search(pattern, response_text, re.IGNORECASE | re.DOTALL | re.MULTILINE)
+        if match:
+            advice = match.group(1).strip()
+            # Clean up: remove any trailing markers
+            advice = re.sub(r'\s*[-–—]\s*$', '', advice)
+            advice = re.sub(r'\s*(?:confidence|note).*$', '', advice, flags=re.IGNORECASE)
+            advice = re.sub(r'\s+', ' ', advice)  # Normalize whitespace
+            if advice and len(advice) > 10:  # Valid advice found
+                break
+    
+    # If extraction failed, try intelligent splitting
     if not diagnosis or not advice:
-        # Try splitting by common separators
-        parts = re.split(r'\n\n+|\n(?:Note:|Important:|Warning:)', response_text)
+        # Remove all label markers first
+        cleaned = re.sub(r'(?:diagnosis/assessment|diagnosis|advice/recommendations?|advice)[:\s]*', '', response_text, flags=re.IGNORECASE)
+        
+        # Try splitting by double newlines or clear separators
+        parts = re.split(r'\n\n+|(?:\n|^)\s*(?:Advice|Recommendation)', cleaned, flags=re.IGNORECASE | re.MULTILINE)
+        parts = [p.strip() for p in parts if p.strip()]
+        
         if len(parts) >= 2:
             diagnosis = parts[0].strip()
             advice = ' '.join(parts[1:]).strip()
-        else:
-            # If single block, use first 40% as diagnosis, rest as advice
-            split_point = len(response_text) // 2.5
-            diagnosis = response_text[:int(split_point)].strip()
-            advice = response_text[int(split_point):].strip()
+        elif len(parts) == 1:
+            # Single part - split roughly in half
+            text = parts[0]
+            split_point = len(text) // 2
+            # Try to split at sentence boundary
+            sentence_end = max(
+                text.rfind('.', 0, split_point),
+                text.rfind('!', 0, split_point),
+                text.rfind('?', 0, split_point)
+            )
+            if sentence_end > len(text) * 0.3:  # Only use if reasonable split point
+                split_point = sentence_end + 1
+            
+            diagnosis = text[:split_point].strip()
+            advice = text[split_point:].strip()
+    
+    # Final cleanup - remove any remaining label text
+    diagnosis = re.sub(r'^\s*(?:diagnosis|assessment)[:\s]*', '', diagnosis, flags=re.IGNORECASE)
+    advice = re.sub(r'^\s*(?:advice|recommendation)[:\s]*', '', advice, flags=re.IGNORECASE)
+    
+    # Remove any remaining separator markers
+    diagnosis = re.sub(r'\s*[-–—]\s*$', '', diagnosis).strip()
+    advice = re.sub(r'\s*[-–—]\s*$', '', advice).strip()
     
     # Fallback if still empty
-    if not diagnosis:
-        diagnosis = response_text[:200].strip() if response_text else "Unable to assess"
-    if not advice:
-        advice = response_text[200:].strip() if len(response_text) > 200 else "Please consult a healthcare professional"
+    if not diagnosis or len(diagnosis) < 10:
+        # Use first 150 chars as diagnosis
+        diagnosis = response_text[:150].strip()
+        # Remove any labels from the beginning
+        diagnosis = re.sub(r'^\s*(?:diagnosis|assessment|⚠️\s*Disclaimer)[:\s]*', '', diagnosis, flags=re.IGNORECASE)
+        diagnosis = re.sub(r'\s*[-–—]\s*', ' ', diagnosis)
     
-    # Assess confidence based on content
-    if check_uncertain_content(response_text):
-        confidence = "low"
-    elif re.search(r'\b(typically|usually|often|common)\b', response_text, re.IGNORECASE):
-        confidence = "medium"
-    elif re.search(r'\b(clear|definite|certain)\b', response_text, re.IGNORECASE):
-        confidence = "high"
+    if not advice or len(advice) < 10:
+        # Try to find advice after diagnosis
+        remaining = response_text[len(diagnosis):].strip()
+        advice = remaining[:200].strip() if remaining else "Please consult a healthcare professional for proper evaluation."
+        # Remove any labels
+        advice = re.sub(r'^\s*(?:advice|recommendation)[:\s]*', '', advice, flags=re.IGNORECASE)
+        advice = re.sub(r'\s*[-–—]\s*', ' ', advice)
+    
+    # Final normalization - remove extra whitespace
+    diagnosis = re.sub(r'\s+', ' ', diagnosis).strip()
+    advice = re.sub(r'\s+', ' ', advice).strip()
     
     return {
-        "diagnosis": diagnosis[:500],  # Limit length
-        "advice": advice[:500],  # Limit length
-        "confidence": confidence
+        "diagnosis": diagnosis[:300],  # Limit length
+        "advice": advice[:300]  # Limit length
     }
 
 # Health check endpoint (API endpoint, separate from root)
@@ -211,14 +267,15 @@ async def ask_question(request: QueryRequest):
     """
     Process a medical query using the local Ollama phi3:mini model
     
-    Returns structured output with diagnosis, advice, and confidence level.
+    Returns structured output with diagnosis and advice.
     Includes safety filtering to prevent dangerous medical claims.
+    Responses are limited to ~200 tokens for faster performance.
     
     Args:
         request: QueryRequest containing the user's query string
         
     Returns:
-        QueryResponse with structured medical information
+        QueryResponse with structured medical information (diagnosis, advice)
         
     Raises:
         HTTPException: If the query is empty or Ollama connection fails
@@ -228,12 +285,11 @@ async def ask_question(request: QueryRequest):
     
     try:
         # Enhanced prompt to encourage structured output
-        structured_prompt = f"""Please provide a medical assessment for the following query. Format your response clearly with:
+        structured_prompt = f"""Please provide a brief medical assessment for the following query. Format your response clearly with:
 - Diagnosis/Assessment: [your assessment]
 - Advice/Recommendations: [your advice]
-- Confidence: [low/medium/high]
 
-Remember: Always emphasize consulting healthcare professionals for serious concerns. Do not prescribe medications or specific dosages.
+Keep responses concise (100-200 words total). Always emphasize consulting healthcare professionals for serious concerns. Do not prescribe medications or specific dosages.
 
 Query: {request.query}"""
         
@@ -254,13 +310,17 @@ Query: {request.query}"""
                 messages=[
                     {
                         'role': 'system',
-                        'content': 'You are a helpful medical assistant. Provide clear, structured medical information. Always remind users that your advice is not a substitute for professional medical consultation. Never prescribe medications or specific dosages.'
+                        'content': 'You are a helpful medical assistant. Provide clear, concise, structured medical information. Always remind users that your advice is not a substitute for professional medical consultation. Never prescribe medications or specific dosages. Keep responses brief and to the point.'
                     },
                     {
                         'role': 'user',
                         'content': structured_prompt
                     }
-                ]
+                ],
+                options={
+                    'num_predict': 200,  # Limit to ~200 tokens for faster response
+                    'temperature': 0.7   # Slightly lower temperature for more focused responses
+                }
             )
         except Exception as e:
             # Check if it's a model not found error

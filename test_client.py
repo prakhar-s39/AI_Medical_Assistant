@@ -47,7 +47,6 @@ def ask_question(query):
             print(f"   {result.get('diagnosis', 'N/A')}")
             print(f"\n💡 Advice/Recommendations:")
             print(f"   {result.get('advice', 'N/A')}")
-            print(f"\n📊 Confidence Level: {result.get('confidence', 'N/A').upper()}")
             print()
             return True
         else:
