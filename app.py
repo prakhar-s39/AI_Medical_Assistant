@@ -5,8 +5,11 @@ Connects to local Ollama installation running phi3:mini model
 
 import re
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 import ollama
+import os
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -14,6 +17,29 @@ app = FastAPI(
     description="Local AI medical assistant powered by Ollama phi3:mini with safety filtering",
     version="2.0.0"
 )
+
+# Mount static files for frontend
+frontend_dir = os.path.join(os.path.dirname(__file__), "frontend")
+if os.path.exists(frontend_dir):
+    app.mount("/static", StaticFiles(directory=frontend_dir), name="static")
+    
+    @app.get("/")
+    async def read_root():
+        """Serve the frontend index.html"""
+        return FileResponse(os.path.join(frontend_dir, "index.html"))
+else:
+    # Fallback root endpoint if frontend doesn't exist
+    @app.get("/")
+    async def read_root():
+        """Health check endpoint"""
+        return {
+            "status": "healthy",
+            "service": "AI Medical Assistant",
+            "model": "phi3:mini",
+            "version": "2.0.0",
+            "features": ["structured_output", "safety_filtering"],
+            "frontend": "not_found"
+        }
 
 # Request/Response models
 class QueryRequest(BaseModel):
@@ -116,9 +142,9 @@ def parse_structured_response(response_text: str) -> dict:
         "confidence": confidence
     }
 
-# Health check endpoint
-@app.get("/")
-async def root():
+# Health check endpoint (API endpoint, separate from root)
+@app.get("/api/health")
+async def health():
     """Health check endpoint"""
     return {
         "status": "healthy",

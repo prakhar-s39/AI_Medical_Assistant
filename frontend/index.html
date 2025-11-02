@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Medical Assistant</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
+</head>
+<body>
+    <div class="background-animation" id="backgroundAnimation"></div>
+    
+    <div class="container">
+        <header>
+            <h1>🏥 AI Medical Assistant</h1>
+            <p class="subtitle">Powered by Local LLM • Raspberry Pi 5</p>
+        </header>
+
+        <div class="main-content">
+            <div class="input-section">
+                <div class="input-wrapper">
+                    <label for="medicalQuery">Ask a Medical Question</label>
+                    <textarea 
+                        id="medicalQuery" 
+                        placeholder="e.g., What are the symptoms of a common cold? What should I do if I have a fever?"
+                        rows="4"
+                    ></textarea>
+                    <button id="submitBtn" onclick="submitQuery()">
+                        <span class="button-text">Ask Question</span>
+                        <span class="button-loader" id="loader" style="display: none;">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                        </span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="response-section" id="responseSection" style="display: none;">
+                <div class="card diagnosis-card" id="diagnosisCard">
+                    <div class="card-header">
+                        <span class="card-icon">📋</span>
+                        <h2>Diagnosis/Assessment</h2>
+                    </div>
+                    <div class="card-content" id="diagnosisContent"></div>
+                </div>
+
+                <div class="card advice-card" id="adviceCard">
+                    <div class="card-header">
+                        <span class="card-icon">💡</span>
+                        <h2>Advice/Recommendations</h2>
+                    </div>
+                    <div class="card-content" id="adviceContent"></div>
+                </div>
+
+                <div class="card confidence-card" id="confidenceCard">
+                    <div class="card-header">
+                        <span class="card-icon">📊</span>
+                        <h2>Confidence Level</h2>
+                    </div>
+                    <div class="card-content" id="confidenceContent"></div>
+                </div>
+            </div>
+
+            <div class="error-section" id="errorSection" style="display: none;">
+                <div class="error-card">
+                    <span class="error-icon">⚠️</span>
+                    <h3>Error</h3>
+                    <p id="errorMessage"></p>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            <p>⚠️ Disclaimer: This assistant provides general information only and is not a substitute for professional medical advice.</p>
+        </footer>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
+

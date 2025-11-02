@@ -6,7 +6,7 @@ A lightweight AI medical assistant backend running locally on Raspberry Pi 5 usi
 
 **Workflow Overview:**
 1. **On Raspberry Pi (via SSH)**: Run the FastAPI server in the background
-2. **On Your Laptop**: Access the API using the Pi's IP address
+2. **On Your Laptop**: Access the web interface or API using the Pi's IP address
 
 **Quick commands:**
 
@@ -18,9 +18,13 @@ tail -f server.log             # View logs
 ./stop_server.sh               # Stop server
 
 # On your laptop:
-# Edit test_client.py with Pi's IP, then:
+# Web Interface (Easiest):
+http://<PI_IP>:8000            # Visit in your browser
+
+# Or test via Python client:
 python3 test_client.py         # Test the API
-# Or visit in browser:
+
+# Or use API docs:
 http://<PI_IP>:8000/docs       # Interactive API docs
 ```
 
@@ -245,20 +249,35 @@ curl -X POST "http://<PI_IP>:8000/ask" \
      -d '{"query": "What are the symptoms of a common cold?"}'
 ```
 
-#### Method 3: Using Browser (Interactive API Docs)
+#### Method 3: Using Web Interface (Easiest - Recommended)
 
-**Access API docs from your laptop's browser:**
-- Swagger UI: `http://<PI_IP>:8000/docs`
-- ReDoc: `http://<PI_IP>:8000/redoc`
+**Access the web interface from your laptop's browser:**
+- **Main Interface**: `http://<PI_IP>:8000`
+- **API Docs (Swagger UI)**: `http://<PI_IP>:8000/docs`
+- **API Docs (ReDoc)**: `http://<PI_IP>:8000/redoc`
 
 **Example:**
-If your Raspberry Pi IP is `192.168.1.100`, visit `http://192.168.1.100:8000/docs` in your browser.
+If your Raspberry Pi IP is `192.168.1.100`, visit `http://192.168.1.100:8000` in your browser.
+
+The web interface provides:
+- ✅ Beautiful, responsive UI
+- ✅ Input field for medical questions
+- ✅ Animated loading indicators
+- ✅ Structured display of diagnosis, advice, and confidence
+- ✅ Smooth background animations
+- ✅ Works on desktop and mobile browsers
+
+**Note:** The frontend is automatically served by FastAPI. No additional setup needed!
 
 ## API Endpoints
 
 ### Health Check
-- **GET** `/`
+- **GET** `/api/health`
 - Returns service status and model information
+
+### Root (Frontend)
+- **GET** `/`
+- Serves the web interface (frontend HTML)
 
 ### Ask Question
 - **POST** `/ask`
@@ -271,9 +290,12 @@ If your Raspberry Pi IP is `192.168.1.100`, visit `http://192.168.1.100:8000/doc
 - **Response:**
   ```json
   {
-    "response": "Common symptoms of a cold include..."
+    "diagnosis": "⚠️ Disclaimer: Not a substitute for professional advice. Symptoms suggest...",
+    "advice": "Please consult a healthcare professional for proper evaluation...",
+    "confidence": "medium"
   }
   ```
+- **Confidence levels:** `"low"`, `"medium"`, or `"high"`
 
 ## Testing
 
@@ -288,11 +310,35 @@ Or use the interactive API docs:
 - Swagger UI: `http://localhost:8000/docs`
 - ReDoc: `http://localhost:8000/redoc`
 
+## Frontend Details
+
+The frontend is located in the `/frontend` directory and includes:
+
+**Files:**
+- `index.html` - Main HTML structure
+- `styles.css` - Responsive styling and animations
+- `script.js` - API communication and animations
+
+**Features:**
+- ✨ Animated pulsing background using anime.js
+- 🎨 Modern, responsive design with gradient backgrounds
+- 📱 Mobile-friendly layout
+- ⏳ Animated loading indicators
+- 🎴 Stylized cards for diagnosis, advice, and confidence
+- 🔄 Smooth animations for card appearance
+- 🎯 Color-coded confidence badges (low/medium/high)
+
+**No Additional Setup Required:**
+- Frontend is automatically served by FastAPI via static file middleware
+- Anime.js is loaded from CDN (no local installation needed)
+- All files are self-contained in the `/frontend` directory
+
 ## Notes
 
 - The `phi3:mini` model is optimized for lightweight inference on resource-constrained devices like Raspberry Pi 5
 - Ensure Ollama is running before starting the FastAPI server
 - The system prompt instructs the model to provide medical information with appropriate disclaimers
+- Frontend automatically connects to the backend API running on the same server
 - For production use, consider adding authentication, rate limiting, and logging
 
 ## Troubleshooting
